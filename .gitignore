@@ -2,3 +2,8 @@
 models.txt
 train.sh
 cfgs/local_test.yaml
+imagenet
+__pycache__
+.vscode
+checkpoints
+logs

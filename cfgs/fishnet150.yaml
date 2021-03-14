@@ -1,9 +1,9 @@
 common:
     arch: fishnet150
-    workers: 1
-    batch_size: 32
+    workers: 4
+    batch_size: 128
 
-    epochs: 100
+    epochs: 1
     policy: "step"
     base_lr: 0.1
     momentum: 0.9
