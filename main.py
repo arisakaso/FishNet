@@ -15,6 +15,8 @@ import os
 from torch.autograd.variable import Variable
 import models
 
+import wandb
+
 
 model_names = sorted(
     name for name in models.__dict__ if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
@@ -62,7 +64,8 @@ USE_GPU = torch.cuda.is_available()
 
 
 def main():
-    global args, best_prec1, USE_GPU
+
+    global args, best_prec1, USE_GPU, run
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -89,6 +92,7 @@ def main():
         model = model.cuda()
         model = torch.nn.DataParallel(model)
 
+    run = wandb.init(project="fishnet", config=args)
     count_params(model)
 
     # define loss function (criterion) and optimizer
@@ -178,7 +182,7 @@ def main():
         train(train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        prec1 = validate(val_loader, model, criterion, epoch)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -201,6 +205,8 @@ def main():
             filename=save_name,
         )
         print(f"epoch {epoch}: Prec@1 {prec1} BestPrec@1 {best_prec1}")
+
+    run.finish()
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -272,11 +278,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
                 )
                 print(line)
                 flog.write("{}\n".format(line))
-
         # break
+    run.log({"train_top1": top1.avg, "train_top5": top1.avg, "train_loss": losses.avg}, step=epoch)
 
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, epoch):
     global time_stp
     batch_time = AverageMeter()
     losses = AverageMeter()
@@ -332,8 +338,8 @@ def validate(val_loader, model, criterion):
                 flog.write("{}\n".format(line))
                 print(line)
 
-            # break
-
+        # break
+    run.log({"val_top1": top1.avg, "val_top5": top1.avg, "val_loss": losses.avg}, step=epoch)
     return top1.avg
 
 
