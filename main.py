@@ -14,12 +14,14 @@ from utils.data_aug import ColorAugmentation
 import os
 from torch.autograd.variable import Variable
 import models
-
+import pytorch_model_summary as pms
 import wandb
 
 
 model_names = sorted(
-    name for name in models.__dict__ if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
+    name
+    for name in models.__dict__
+    if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
 )
 
 parser = argparse.ArgumentParser(description="PyTorch ImageNet Training")
@@ -57,10 +59,13 @@ parser.add_argument("--model_name", default="", type=str, help="name of the mode
 best_prec1 = 0
 
 model_names = sorted(
-    name for name in models.__dict__ if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
+    name
+    for name in models.__dict__
+    if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
 )
 
-USE_GPU = torch.cuda.is_available()
+# USE_GPU = torch.cuda.is_available()
+USE_GPU = False
 
 
 def main():
@@ -94,6 +99,14 @@ def main():
 
     run = wandb.init(project="fishnet", config=args)
     count_params(model)
+    pms.summary(
+        model,
+        torch.zeros(1, 3, 224, 224),
+        max_depth=3,
+        show_parent_layers=True,
+        show_hierarchical=True,
+        print_summary=True,
+    )
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -143,6 +156,7 @@ def main():
             ]
         ),
     )
+    print(train_dataset[0])
 
     # if args.distributed:
     #     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
