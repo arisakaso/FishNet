@@ -279,7 +279,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
                 print(line)
                 flog.write("{}\n".format(line))
         # break
-    run.log({"train_top1": top1.avg, "train_top5": top1.avg, "train_loss": losses.avg}, step=epoch)
+    run.log({"train_top1": top1.avg, "train_top5": top5.avg, "train_loss": losses.avg}, step=epoch)
 
 
 def validate(val_loader, model, criterion, epoch):
@@ -339,7 +339,7 @@ def validate(val_loader, model, criterion, epoch):
                 print(line)
 
         # break
-    run.log({"val_top1": top1.avg, "val_top5": top1.avg, "val_loss": losses.avg}, step=epoch)
+    run.log({"val_top1": top1.avg, "val_top5": top5.avg, "val_loss": losses.avg}, step=epoch)
     return top1.avg
 
 
