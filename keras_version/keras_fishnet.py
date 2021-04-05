@@ -317,25 +317,26 @@ img_outputs2 = layers.Flatten()(x79)
 test_mdl2 = keras.Model(img_inputs2, img_outputs2, name="test_mdl4")
 test_mdl2.summary()
 
+opt = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)  # TODO:weight decay
 test_mdl2.compile(
-    optimizer="adam",
-    loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    optimizer=opt,
+    loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
     metrics=["accuracy"],
 )
 
 # data setup
 train_datagen = ImageDataGenerator(horizontal_flip=True, rescale=1.0 / 255)
-train_path = "/root/FishNet/imagenet/train"
-train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True)
+train_path = "/root/imagenet/train"
+train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True, batch_size=32)
 
 val_datagen = ImageDataGenerator(rescale=1.0 / 255)
-val_path = "/root/FishNet/imagenet/val"
-val_it = val_datagen.flow_from_directory(val_path, target_size=(224, 224), shuffle=False)
+val_path = "/root/imagenet/val"
+val_it = val_datagen.flow_from_directory(val_path, target_size=(224, 224), shuffle=False, batch_size=32)
 
 # fit
-history = test_mdl2.fit_generator(
-    generator=train_it,
-    epochs=1,
+history = test_mdl2.fit(
+    x=train_it,
+    epochs=5,
     validation_data=val_it,
     callbacks=[TqdmCallback(verbose=1)],
 )
