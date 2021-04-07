@@ -132,16 +132,28 @@ class Bottleneck_JQ(layers.Layer):
         return out
 
     def channel_reduction(self, idt):
-        # n,w,h,c = idt.shape
-        k = self.k
-        planes = self.planes
-        store = tf.math.reduce_sum(idt[:, :, :, 0:k], axis=3, keepdims=True)
-        for i in range(1, planes):
-            # print(store.shape)
-            store = layers.concatenate(
-                [store, tf.math.reduce_sum(idt[:, :, :, i * k : (i * k) + k], axis=3, keepdims=True)]
-            )
-        return store
+        n = tf.shape(idt)[0]
+        h = tf.shape(idt)[1]
+        w = tf.shape(idt)[2]
+        c = tf.shape(idt)[3]
+        # n, h, w, c = tf.shape(idt)
+        ## the above fails because these can be undefined when building the computational graph.
+        ## see https://github.com/tensorflow/models/issues/6245
+        idt_rehsaped = tf.reshape(idt, (n, h, w, c // self.k, self.k))
+        idt_reduced = tf.math.reduce_sum(idt_rehsaped, axis=-1)
+        return idt_reduced  # this should be correct and line 274 should be modified.
+
+        # k = self.k
+        # planes = self.planes
+        # store = tf.math.reduce_sum(idt[:, :, :, 0:k], axis=3, keepdims=True)
+        # for i in range(1, planes):
+        #     # print(store.shape)
+        #     store = layers.concatenate(
+        #         [store, tf.math.reduce_sum(idt[:, :, :, i * k : (i * k) + k], axis=3, keepdims=True)]
+        #     )
+        #     # when planes and k don't agree, this ends up dropping the rest layers.
+        #     # e.g. Bottleneck_JQ(256, 64, mode="UP")(x57)
+        # return store
 
     def call(self, x):
         out = self._pre_act_forward(x)
@@ -260,7 +272,7 @@ x56 = Bottleneck_JQ(256, 256)(x55)
 x57 = layers.UpSampling2D((2, 2))(x56)
 
 # 56x56 Stage
-x58 = Bottleneck_JQ(256, 64, mode="UP")(x57)
+x58 = Bottleneck_JQ(256, 64, mode="UP", k=4)(x57)
 x59 = Bottleneck_JQ(64, 64)(x58)
 x59a = layers.UpSampling3D((1, 1, 3))(x59)  # another weird upsampling situation to make the numbers work
 x60 = layers.Concatenate()([x59a, x12])  # Concatenation does not happen at the begining of the stage?
@@ -322,11 +334,13 @@ test_mdl2.compile(
     optimizer=opt,
     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
     metrics=["accuracy"],
+    run_eagerly=True,  # for debug
 )
 
 # data setup
 train_datagen = ImageDataGenerator(horizontal_flip=True, rescale=1.0 / 255)
-train_path = "/root/imagenet/train"
+# train_path = "/root/imagenet/train"
+train_path = "/root/imagenet/val"  # for test
 train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True, batch_size=32)
 
 val_datagen = ImageDataGenerator(rescale=1.0 / 255)
