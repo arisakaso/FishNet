@@ -64,8 +64,8 @@ model_names = sorted(
     if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
 )
 
-# USE_GPU = torch.cuda.is_available()
-USE_GPU = False
+USE_GPU = torch.cuda.is_available()
+# USE_GPU = False
 
 
 def main():
@@ -99,14 +99,14 @@ def main():
 
     run = wandb.init(project="fishnet", config=args)
     count_params(model)
-    pms.summary(
-        model,
-        torch.zeros(1, 3, 224, 224),
-        max_depth=3,
-        show_parent_layers=True,
-        show_hierarchical=True,
-        print_summary=True,
-    )
+    # pms.summary(
+    #     model,
+    #     torch.zeros(1, 3, 224, 224),
+    #     max_depth=3,
+    #     show_parent_layers=True,
+    #     show_hierarchical=True,
+    #     print_summary=True,
+    # )
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -156,7 +156,7 @@ def main():
             ]
         ),
     )
-    print(train_dataset[0])
+    # print(train_dataset[0])
 
     # if args.distributed:
     #     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
