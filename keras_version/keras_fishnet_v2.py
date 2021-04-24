@@ -244,7 +244,9 @@ x44 = layers.UpSampling2D((2, 2))(x43)
 # 14X14 Stage
 x45 = Bottleneck_JQ(512, 256)(x44)
 x46 = Bottleneck_JQ(256, 256)(x45)
-x47 = Bottleneck_JQ(256, 384)(x46)
+x46a = layers.Concatenate()([x44, x46])  # concatenate
+# x47 = Bottleneck_JQ(256,384)(x48)
+x47 = Bottleneck_JQ(768, 384, mode="UP", k=2)(x46a)
 x48 = Bottleneck_JQ(384, 384)(x47)
 
 x48a = layers.UpSampling2D((2, 2))(x48)
@@ -252,7 +254,9 @@ x48a = layers.UpSampling2D((2, 2))(x48)
 # 28X28 Stage
 x49 = Bottleneck_JQ(384, 128)(x48a)
 x50 = Bottleneck_JQ(128, 128)(x49)
-x51 = Bottleneck_JQ(128, 256)(x50)
+x50a = layers.Concatenate()([x48a, x50])  # concatenate
+x51 = Bottleneck_JQ(512, 256, mode="UP", k=2)(x50a)
+# x51 = Bottleneck_JQ(128,256)(x50)
 x52 = Bottleneck_JQ(256, 256)(x51)
 
 x52a = layers.UpSampling2D((2, 2))(x52)
@@ -260,7 +264,8 @@ x52a = layers.UpSampling2D((2, 2))(x52)
 # 56X56 Stage
 x53 = Bottleneck_JQ(256, 64)(x52a)
 x54 = Bottleneck_JQ(64, 64)(x53)
-x55 = Bottleneck_JQ(64, 320)(x54)
+x54a = layers.Concatenate()([x52a, x54])  # concatenate
+x55 = Bottleneck_JQ(64, 320)(x54a)
 x56 = Bottleneck_JQ(320, 320)(x55)
 
 x56a = layers.MaxPool2D(2, strides=2)(x56)
@@ -269,7 +274,8 @@ x56a = layers.MaxPool2D(2, strides=2)(x56)
 # 28X28 Stage
 x57 = Bottleneck_JQ(320, 512)(x56a)
 x58 = Bottleneck_JQ(512, 512)(x57)
-x59 = Bottleneck_JQ(512, 832)(x58)
+x58a = layers.Concatenate()([x56a, x58])  # concatenate
+x59 = Bottleneck_JQ(512, 832)(x58a)
 x60 = Bottleneck_JQ(832, 832)(x59)
 
 x60a = layers.MaxPool2D(2, strides=2)(x60)
@@ -277,8 +283,9 @@ x60a = layers.MaxPool2D(2, strides=2)(x60)
 # 14X14 Stage
 x61 = Bottleneck_JQ(832, 768)(x60a)
 x62 = Bottleneck_JQ(768, 768)(x61)
-x63 = Bottleneck_JQ(768, 1600)(x62)
-x64 = Bottleneck_JQ(1600, 1600)(x63)
+# x63 = Bottleneck_JQ(768,1600)(x62)
+x63a = layers.Concatenate()([x60a, x62])  # concatenate
+x64 = Bottleneck_JQ(1600, 1600)(x63a)
 x65 = Bottleneck_JQ(1600, 1600)(x64)
 x66 = Bottleneck_JQ(1600, 1600)(x65)
 
@@ -323,7 +330,7 @@ def lr_scheduler_w(epoch, lr, weight_decay):
         return lr, weight_decay
 
 
-opt = tfa.optimizers.SGDW(weight_decay=0.0001, learning_rate=0.01, momentum=0.9)
+opt = tfa.optimizers.SGDW(weight_decay=0.0001, learning_rate=0.05, momentum=0.9)
 # opt = keras.optimizers.SGD(learning_rate=0.05, momentum=0.9)  # TODO:weight decay
 test_mdl1.compile(
     optimizer=opt,
@@ -332,7 +339,16 @@ test_mdl1.compile(
 )
 
 # data setup
-train_datagen = ImageDataGenerator(horizontal_flip=True, rescale=1.0 / 255)
+train_datagen = ImageDataGenerator(
+    rotation_range=40,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    rescale=1.0 / 255,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode="nearest",
+)
 train_path = "/root/subimagenet/train"
 train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True, batch_size=64)
 
@@ -345,6 +361,7 @@ history = test_mdl1.fit(
     x=train_it,
     epochs=100,
     validation_data=val_it,
+    workers=8,
     callbacks=[WandbCallback(), LearningRateScheduler(lr_scheduler_w)],
 )
 hist = pd.DataFrame(history.history)
