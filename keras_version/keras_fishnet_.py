@@ -108,8 +108,8 @@ class Bottleneck_JQ(layers.Layer):
             self.shortcut = None  # if the inplanes equal the planes, ie no change in number of channels, then we just don't implement this bypass step
 
     def _pre_act_forward(self, x):
-
         residual = x
+
         out = self.bn1(x)
         out = self.relu(out)
         out = self.conv1(out)
@@ -136,33 +136,39 @@ class Bottleneck_JQ(layers.Layer):
         h = tf.shape(idt)[1]
         w = tf.shape(idt)[2]
         c = tf.shape(idt)[3]
-
+        # n, h, w, c = tf.shape(idt)
+        ## the above fails because these can be undefined when building the computational graph.
+        ## see https://github.com/tensorflow/models/issues/6245
         idt_rehsaped = tf.reshape(idt, (n, h, w, c // self.k, self.k))
         idt_reduced = tf.math.reduce_sum(idt_rehsaped, axis=-1)
         return idt_reduced  # this should be correct and line 274 should be modified.
 
-    # n, h, w, c = tf.shape(idt)
-    ## the above fails because these can be undefined when building the computational graph.
-    ## see https://github.com/tensorflow/models/issues/6245
-    # k = self.k
-    # planes = self.planes
-    # store = tf.math.reduce_sum(idt[:,:,:,0:k],axis=3, keepdims=True)
-    # for i in range(1,planes):
-    #   print(store.shape)
-    #   store = layers.concatenate([store,tf.math.reduce_sum(idt[:,:,:,i*k:(i*k)+k],axis=3, keepdims=True)])
-    # return store
+        # k = self.k
+        # planes = self.planes
+        # store = tf.math.reduce_sum(idt[:, :, :, 0:k], axis=3, keepdims=True)
+        # for i in range(1, planes):
+        #     # print(store.shape)
+        #     store = layers.concatenate(
+        #         [store, tf.math.reduce_sum(idt[:, :, :, i * k : (i * k) + k], axis=3, keepdims=True)]
+        #     )
+        #     # when planes and k don't agree, this ends up dropping the rest layers.
+        #     # e.g. Bottleneck_JQ(256, 64, mode="UP")(x57)
+        # return store
 
     def call(self, x):
         out = self._pre_act_forward(x)
         return out
 
 
-number_classes = 18  # 1000 for Imagenet
+# cifar10 shenanigans
+# cifar = keras.Input(shape=(32, 32, 3))
+# img_inputs2 = layers.UpSampling2D((7, 7))(cifar)
 
-img_inputs = keras.Input(shape=(224, 224, 3))
+# what i actually wanted to train
+img_inputs2 = keras.Input(shape=(224, 224, 3))
 
-# Start of keras model
-x1 = layers.Conv2D(32, 3, activation=None, padding="same", strides=(2, 2), use_bias=False)(img_inputs)
+# 112X112 pre-Stage
+x1 = layers.Conv2D(32, 3, activation=None, padding="same", strides=(2, 2), use_bias=False)(img_inputs2)
 x2 = layers.BatchNormalization()(x1)
 x3 = layers.Activation("relu")(x2)
 
@@ -174,7 +180,7 @@ x7 = layers.Conv2D(64, 3, activation=None, padding="same", strides=(1, 1), use_b
 x8 = layers.BatchNormalization()(x7)
 x9 = layers.Activation("relu")(x8)
 
-x10 = layers.MaxPool2D(2, strides=2)(x9)
+x10 = layers.MaxPool2D(2, strides=2)(x9)  # first max pool -> Kernel Size 3
 
 # 56x56 stage
 x11 = Bottleneck_JQ(64, 128)(x10)  # NORM type bottleneck layer, shortcut is used.
@@ -188,7 +194,9 @@ x15 = Bottleneck_JQ(256, 256)(x14)
 x16 = Bottleneck_JQ(256, 256)(x15)
 x17 = Bottleneck_JQ(256, 256)(x16)
 
-x17a = layers.MaxPool2D(2, strides=2)(x17)
+x17a = layers.MaxPool2D(2, strides=2)(
+    x17
+)  # this does not show up in the hierarchial summary table, but it can be found in the detailed code section.
 
 # 14X14 Stage
 x18 = Bottleneck_JQ(256, 512)(x17a)
@@ -200,121 +208,137 @@ x23 = Bottleneck_JQ(512, 512)(x22)
 x24 = Bottleneck_JQ(512, 512)(x23)
 x25 = Bottleneck_JQ(512, 512)(x24)
 
-x25a = layers.MaxPool2D(2, strides=2)(x25)
+x25a = layers.MaxPool2D(2, strides=2)(x25)  # did not appear in summary
 
 # 7X7 Stage
 x26 = layers.BatchNormalization()(x25a)
 x27 = layers.Activation("relu")(x26)
 x28 = layers.Conv2D(256, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x27)
 x29 = layers.BatchNormalization()(x28)
+x29 = layers.Activation("relu")(x29)  # did not appear in summary as well
+
 x30 = layers.Conv2D(1024, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x29)
-x31 = layers.BatchNormalization()(x30)
-x32 = layers.Activation("relu")(x31)
 
-# 1X1 Stage
-x33 = layers.GlobalAveragePooling2D()(x32)
-x33a = layers.Reshape((1, 1, 1024))(x33)
-x34 = layers.Conv2D(32, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x33a)  # sq_conv
-x35 = layers.Activation("relu")(x34)
-x36 = layers.Conv2D(512, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x35)  # ex_conv
-x37 = layers.Activation("sigmoid")(x36)
+x31 = Bottleneck_JQ(1024, 512)(x30)
+x32 = Bottleneck_JQ(512, 512)(x31)
+x33 = Bottleneck_JQ(512, 512)(x32)
+x34 = Bottleneck_JQ(512, 512)(x33)
 
-x37a = layers.UpSampling2D((7, 7))(x37)
+# SE Block
+x35 = layers.BatchNormalization()(x34)
+x36 = layers.Activation("relu")(x35)
+x37 = layers.GlobalAveragePooling2D()(x36)  # does not translate from pytorch perfectly
+x38 = layers.Reshape((1, 1, 512))(x37)
+x39 = layers.Conv2D(32, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x38)  # sq_conv
+x40 = layers.Activation("relu")(x39)
+x41 = layers.Conv2D(512, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x40)  # ex_conv
+x42 = layers.Activation("sigmoid")(x41)
 
-# 7X7 Stage
-x38 = Bottleneck_JQ(512, 512)(x37a)
-x39 = Bottleneck_JQ(512, 512)(x38)
-x40 = Bottleneck_JQ(512, 512)(x39)
-x41 = Bottleneck_JQ(512, 512)(x40)
-x42 = Bottleneck_JQ(512, 512)(x41)
-x43 = Bottleneck_JQ(512, 512)(x42)
+# upsampling
+x42a = layers.UpSampling2D((7, 7))(x42)
 
 # BODY
-# 14x14 upsampling
-x44 = layers.UpSampling2D((2, 2))(x43)
-
-# 14X14 Stage
-x45 = Bottleneck_JQ(512, 256)(x44)
-x46 = Bottleneck_JQ(256, 256)(x45)
-x47 = Bottleneck_JQ(256, 384)(x46)
-x48 = Bottleneck_JQ(384, 384)(x47)
-
-x48a = layers.UpSampling2D((2, 2))(x48)
-
-# 28X28 Stage
-x49 = Bottleneck_JQ(384, 128)(x48a)
-x50 = Bottleneck_JQ(128, 128)(x49)
-x51 = Bottleneck_JQ(128, 256)(x50)
-x52 = Bottleneck_JQ(256, 256)(x51)
-
-x52a = layers.UpSampling2D((2, 2))(x52)
-
-# 56X56 Stage
-x53 = Bottleneck_JQ(256, 64)(x52a)
-x54 = Bottleneck_JQ(64, 64)(x53)
-x55 = Bottleneck_JQ(64, 320)(x54)
-x56 = Bottleneck_JQ(320, 320)(x55)
-
-x56a = layers.MaxPool2D(2, strides=2)(x56)
-
-# HEAD
-# 28X28 Stage
-x57 = Bottleneck_JQ(320, 512)(x56a)
-x58 = Bottleneck_JQ(512, 512)(x57)
-x59 = Bottleneck_JQ(512, 832)(x58)
-x60 = Bottleneck_JQ(832, 832)(x59)
-
-x60a = layers.MaxPool2D(2, strides=2)(x60)
-
-# 14X14 Stage
-x61 = Bottleneck_JQ(832, 768)(x60a)
-x62 = Bottleneck_JQ(768, 768)(x61)
-x63 = Bottleneck_JQ(768, 1600)(x62)
-x64 = Bottleneck_JQ(1600, 1600)(x63)
-x65 = Bottleneck_JQ(1600, 1600)(x64)
-x66 = Bottleneck_JQ(1600, 1600)(x65)
-
-x66a = layers.MaxPool2D(2, strides=2)(x66)
-
 # 7X7 Stage
-x67 = Bottleneck_JQ(1600, 512)(x66a)
-x68 = Bottleneck_JQ(512, 512)(x67)
-x69 = Bottleneck_JQ(512, 512)(x68)
-x70 = Bottleneck_JQ(512, 512)(x69)
+x43 = Bottleneck_JQ(512, 512)(x42a)
+x43a = Bottleneck_JQ(512, 512)(x43)
+x43b = Bottleneck_JQ(512, 512)(x43a)
+x43c = Bottleneck_JQ(512, 512)(x43b)
+x43d = Bottleneck_JQ(512, 512)(x43c)
+x44 = Bottleneck_JQ(512, 512)(x43d)
 
-x71 = layers.Concatenate()([x66a, x70])
+# upsampling
+x45 = layers.UpSampling2D((2, 2))(x44)
 
-x72 = layers.BatchNormalization()(x71)
-x73 = layers.Activation("relu")(x72)
-x74 = layers.Conv2D(1056, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x73)
-x75 = layers.BatchNormalization()(x74)
-x76 = layers.GlobalAveragePooling2D()(x75)  # does not translate from pytorch perfectly
-x77 = layers.Reshape((1, 1, 1056))(x76)
-x78 = layers.Conv2D(number_classes, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x77)
+# 14X14 Stage
+x46 = Bottleneck_JQ(512, 256, mode="UP", k=2)(x45)  # no shortcut, uses channel reduction function.
+x47 = Bottleneck_JQ(256, 256)(x46)
+x48 = layers.Concatenate()([x47, x25])  # Concatenation does not happen at the begining of the stage?
+x49 = Bottleneck_JQ(768, 384, mode="UP", k=2)(x48)
+x50 = Bottleneck_JQ(384, 384)(x49)
+
+
+# upsampling
+x51 = layers.UpSampling2D((2, 2))(x50)
+
+# 28x28 Stage
+x52 = Bottleneck_JQ(384, 128, mode="UP", k=3)(x51)
+x53 = Bottleneck_JQ(128, 128)(x52)
+x53a = layers.UpSampling3D((1, 1, 2))(x53)  # upsampled the channels in order to make the numbers work
+x54 = layers.Concatenate()([x53a, x17])  # Concatenation does not happen at the begining of the stage?
+x55 = Bottleneck_JQ(512, 256, mode="UP", k=2)(x54)
+x56 = Bottleneck_JQ(256, 256)(x55)
+
+# upsampling
+x57 = layers.UpSampling2D((2, 2))(x56)
+
+# 56x56 Stage
+x58 = Bottleneck_JQ(256, 64, mode="UP", k=4)(x57)
+x59 = Bottleneck_JQ(64, 64)(x58)
+x59a = layers.UpSampling3D((1, 1, 3))(x59)  # another weird upsampling situation to make the numbers work
+x60 = layers.Concatenate()([x59a, x12])  # Concatenation does not happen at the begining of the stage?
+x61 = Bottleneck_JQ(320, 320)(x60)  # THERE IS SOME SUPREME WEIRDNESS GOING ON HERE
+x62 = Bottleneck_JQ(320, 320)(x61)
+
+
+# downsampling
+x63 = layers.MaxPool2D(2, strides=2)(x62)
+
+# begining of head 28X28
+# my suspicion, it that the transfered layer is run through 2 bottleneck layers before being concatenated.
+x54_t1 = Bottleneck_JQ(512, 512)(x54)
+x54_t2 = Bottleneck_JQ(512, 512)(x54_t1)
+
+x64 = layers.Concatenate()([x63, x54_t2])  # this is the only way to get a layer with 832 filters
+x65 = Bottleneck_JQ(832, 832)(x64)
+x66 = Bottleneck_JQ(832, 832)(x65)
+
+# downsampling
+x67 = layers.MaxPool2D(2, strides=2)(x66)
+
+# 14X14 head
+# same thing happens here, the transfered block gets run through 2 bottleneck layers before being concatenated
+x48_t1 = Bottleneck_JQ(768, 768)(x48)
+x48_t2 = Bottleneck_JQ(768, 768)(x48_t1)
+
+x68 = layers.Concatenate()([x67, x48_t2])  # again, this is the only way I know how to get a
+x69 = Bottleneck_JQ(1600, 1600)(x68)
+x70 = Bottleneck_JQ(1600, 1600)(x69)
+
+# downsampling
+x71 = layers.MaxPool2D(2, strides=2)(x70)
+
+# 7X7 head
+# same thing happens here, except this time the transfered block is run through 4 bottlenexk layers.
+x44_t1 = Bottleneck_JQ(512, 512)(x44)
+x44_t2 = Bottleneck_JQ(512, 512)(x44_t1)
+x44_t3 = Bottleneck_JQ(512, 512)(x44_t2)
+x44_t4 = Bottleneck_JQ(512, 512)(x44_t3)
+
+x72 = layers.Concatenate()([x71, x44_t4])
+x73 = layers.BatchNormalization()(x72)
+x74 = layers.Activation("relu")(x73)
+x75 = layers.Conv2D(1056, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x74)
+x76 = layers.BatchNormalization()(x75)
+x77 = layers.GlobalAveragePooling2D()(x76)  # does not translate from pytorch perfectly
+x78 = layers.Reshape((1, 1, 1056))(x77)
+x79 = layers.Conv2D(1000, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x78)
+# OMG WE'RE FINALLY DONE
 
 # output layers (these aren't part of FishNet, this is our own top layer to make it fit the dataset we are using)
-img_outputs2 = layers.Flatten()(x78)
-test_mdl1 = keras.Model(img_inputs, img_outputs2, name="test_mdl1")
-test_mdl1.summary()
+img_outputs2 = layers.Flatten()(x79)
+test_mdl2 = keras.Model(img_inputs2, img_outputs2, name="test_mdl4")
+test_mdl2.summary()
 
 opt = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)  # TODO:weight decay
-test_mdl1.compile(
+test_mdl2.compile(
     optimizer=opt,
     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
     metrics=["accuracy"],
+    run_eagerly=True,  # for debug
 )
 
 # data setup
-train_datagen = ImageDataGenerator(
-    rotation_range=40,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    rescale=1.0 / 255,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    fill_mode="nearest",
-)
+train_datagen = ImageDataGenerator(horizontal_flip=True, rescale=1.0 / 255)
 # train_path = "/root/imagenet/train"
 train_path = "/root/imagenet/val"  # for test
 train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True, batch_size=32)
@@ -324,9 +348,9 @@ val_path = "/root/imagenet/val"
 val_it = val_datagen.flow_from_directory(val_path, target_size=(224, 224), shuffle=False, batch_size=32)
 
 # fit
-history = test_mdl1.fit(
+history = test_mdl2.fit(
     x=train_it,
-    epochs=100,
+    epochs=5,
     validation_data=val_it,
     callbacks=[TqdmCallback(verbose=1)],
 )
