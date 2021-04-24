@@ -21,10 +21,14 @@ from tensorflow.keras import backend as K
 from tensorflow.keras import constraints
 from tensorflow.keras import initializers
 from tensorflow.keras import regularizers
+from tensorflow.keras.callbacks import LearningRateScheduler
 
 # from tensorflow.keras.engine.base_layer import Layer
 
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import wandb
+from wandb.keras import WandbCallback
+import tensorflow_addons as tfa
 
 
 class Bottleneck_JQ(layers.Layer):
@@ -160,6 +164,7 @@ class Bottleneck_JQ(layers.Layer):
         return out
 
 
+run = wandb.init(project="fishnet")
 # cifar10 shenanigans
 # cifar = keras.Input(shape=(32, 32, 3))
 # img_inputs2 = layers.UpSampling2D((7, 7))(cifar)
@@ -194,9 +199,8 @@ x15 = Bottleneck_JQ(256, 256)(x14)
 x16 = Bottleneck_JQ(256, 256)(x15)
 x17 = Bottleneck_JQ(256, 256)(x16)
 
-x17a = layers.MaxPool2D(2, strides=2)(
-    x17
-)  # this does not show up in the hierarchial summary table, but it can be found in the detailed code section.
+x17a = layers.MaxPool2D(2, strides=2)(x17)
+# this does not show up in the hierarchial summary table, but it can be found in the detailed code section.
 
 # 14X14 Stage
 x18 = Bottleneck_JQ(256, 512)(x17a)
@@ -321,7 +325,7 @@ x75 = layers.Conv2D(1056, 1, activation=None, padding="same", strides=(1, 1), us
 x76 = layers.BatchNormalization()(x75)
 x77 = layers.GlobalAveragePooling2D()(x76)  # does not translate from pytorch perfectly
 x78 = layers.Reshape((1, 1, 1056))(x77)
-x79 = layers.Conv2D(1000, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x78)
+x79 = layers.Conv2D(18, 1, activation=None, padding="same", strides=(1, 1), use_bias=False)(x78)
 # OMG WE'RE FINALLY DONE
 
 # output layers (these aren't part of FishNet, this is our own top layer to make it fit the dataset we are using)
@@ -329,7 +333,26 @@ img_outputs2 = layers.Flatten()(x79)
 test_mdl2 = keras.Model(img_inputs2, img_outputs2, name="test_mdl4")
 test_mdl2.summary()
 
-opt = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9)  # TODO:weight decay
+
+def lr_scheduler(epoch, lr):
+    if (epoch + 1) % 30 == 0:
+        print("deacay learning rate")
+        return lr * 0.1
+    else:
+        return lr
+
+
+def lr_scheduler_w(epoch, lr, weight_decay):
+    if (epoch + 1) % 30 == 0:
+        print("deacay learning rate and decay weight decay")
+        print(lr, weight_decay)
+        return lr * 0.1, weight_decay * 0.1
+    else:
+        return lr, weight_decay
+
+
+opt = tfa.optimizers.SGDW(weight_decay=0.0001, learning_rate=0.01, momentum=0.9)
+# opt = keras.optimizers.SGD(learning_rate=0.05, momentum=0.9)  # TODO:weight decay
 test_mdl2.compile(
     optimizer=opt,
     loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True),
@@ -339,20 +362,19 @@ test_mdl2.compile(
 
 # data setup
 train_datagen = ImageDataGenerator(horizontal_flip=True, rescale=1.0 / 255)
-# train_path = "/root/imagenet/train"
-train_path = "/root/imagenet/val"  # for test
-train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True, batch_size=32)
+train_path = "/root/subimagenet/train"
+train_it = train_datagen.flow_from_directory(train_path, target_size=(224, 224), shuffle=True, batch_size=64)
 
 val_datagen = ImageDataGenerator(rescale=1.0 / 255)
-val_path = "/root/imagenet/val"
-val_it = val_datagen.flow_from_directory(val_path, target_size=(224, 224), shuffle=False, batch_size=32)
+val_path = "/root/subimagenet/val"
+val_it = val_datagen.flow_from_directory(val_path, target_size=(224, 224), shuffle=False, batch_size=64)
 
 # fit
 history = test_mdl2.fit(
     x=train_it,
-    epochs=5,
+    epochs=100,
     validation_data=val_it,
-    callbacks=[TqdmCallback(verbose=1)],
+    callbacks=[WandbCallback(), LearningRateScheduler(lr_scheduler_w)],
 )
 hist = pd.DataFrame(history.history)
 
